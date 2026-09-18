@@ -2,7 +2,7 @@ name: Unit Tests
 
 on:
   push:
-    branches: [ 'main', '2.0.x-dev' ]
+    branches: [ 'main', '2.0.x-dev', 'codex/ci-upload-discovery-pagination' ]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
@@ -18,7 +18,7 @@ jobs:
     # The main job installs --extra postgres; this job proves the documented
     # contributor path (uv sync --group dev, no extras) still collects the
     # whole suite, so optional-dependency imports must stay lazy.
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -46,7 +46,7 @@ jobs:
         run: uv run pytest --collect-only -q
 
   backend-unit-tests:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
