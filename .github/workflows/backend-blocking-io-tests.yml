@@ -2,7 +2,7 @@ name: Backend Blocking IO
 
 on:
   push:
-    branches: ["main", "2.0.x-dev"]
+    branches: ["main", "2.0.x-dev", "codex/ci-ragflow-document-validation"]
     paths:
       - "backend/**"
       - ".github/workflows/backend-blocking-io-tests.yml"
