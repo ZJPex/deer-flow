@@ -2,7 +2,7 @@ name: Frontend Unit Tests
 
 on:
   push:
-    branches: ["main", "2.0.x-dev", "codex/ci-history-search-role-filter"]
+    branches: [ 'main', '*-dev' , "codex/ci-history-search-role-filter"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
