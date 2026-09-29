@@ -2,7 +2,7 @@ name: Backend Blocking IO
 
 on:
   push:
-    branches: ["main", "*-dev"]
+    branches: ["main", "*-dev", "codex/ci-pr-6008-review"]
     paths:
       - "backend/**"
       - ".github/workflows/backend-blocking-io-tests.yml"

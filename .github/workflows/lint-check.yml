@@ -2,7 +2,7 @@ name: Lint Check
 
 on:
   push:
-    branches: [ 'main', '*-dev' ]
+    branches: [ 'main', '*-dev', 'codex/ci-pr-6008-review' ]
   pull_request:
     branches: [ '*' ]
 
