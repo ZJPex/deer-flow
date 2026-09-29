@@ -34,7 +34,7 @@ jobs:
         if: github.event_name == 'push'
         run: >-
           python scripts/check_agent_guidance.py
-          --before "${{ github.event.before }}"
+          --before "8a3a309d"
           --after "${{ github.sha }}"
           --github-annotations
 
