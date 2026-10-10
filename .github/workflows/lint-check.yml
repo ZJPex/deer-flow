@@ -1,6 +1,7 @@
 name: Lint Check
 
 on:
+  workflow_dispatch:
   push:
     branches: [ 'main', '*-dev' ]
   pull_request:
@@ -36,6 +37,14 @@ jobs:
           python scripts/check_agent_guidance.py
           --before "${{ github.event.before }}"
           --after "${{ github.sha }}"
+          --github-annotations
+
+      - name: Check agent guidance on manual verification
+        if: github.event_name == 'workflow_dispatch'
+        run: >-
+          python scripts/check_agent_guidance.py
+          --base-ref "ab9920f25f1560a38a7820a52469ef3dc5767071"
+          --head-ref "${{ github.sha }}"
           --github-annotations
 
   lint-backend:
