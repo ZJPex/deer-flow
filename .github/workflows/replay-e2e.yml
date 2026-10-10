@@ -9,6 +9,7 @@ name: Replay E2E (front-back contract)
 # longer pass without the frontend-facing checks running.
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main", "*-dev"]
     paths:

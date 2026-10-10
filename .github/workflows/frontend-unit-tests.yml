@@ -1,6 +1,7 @@
 name: Frontend Unit Tests
 
 on:
+  workflow_dispatch:
   push:
     branches: [ 'main', '*-dev' ]
   pull_request:
