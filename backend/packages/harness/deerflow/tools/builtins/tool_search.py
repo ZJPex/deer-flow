@@ -24,8 +24,10 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cached_property
+from time import monotonic
 from typing import TYPE_CHECKING, Annotated, Any
 
+import regex
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -40,18 +42,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 5  # Max tools returned per search
+MAX_REGEX_PATTERN_CHARS = 256
+MAX_REGEX_FIELD_CHARS = 65_536
+REGEX_QUERY_TIMEOUT_SECONDS = 0.1
 
 
-def _compile_catalog_regex(pattern: str) -> re.Pattern[str]:
+class ToolSearchLimitError(ValueError):
+    """The query exceeded the discovery budget; no partial ranking is valid."""
+
+
+def _compile_catalog_regex(pattern: str) -> regex.Pattern[str]:
     """Compile ``pattern`` case-insensitively, falling back to a literal match.
 
     Search queries come from the model, so an invalid regex (e.g. an unbalanced
     paren) must degrade to a literal substring match rather than raise.
     """
+    if len(pattern) > MAX_REGEX_PATTERN_CHARS:
+        raise ToolSearchLimitError(f"Regex pattern exceeds the {MAX_REGEX_PATTERN_CHARS}-character budget.")
     try:
-        return re.compile(pattern, re.IGNORECASE)
+        # Keep Python re's accepted syntax and invalid-pattern literal fallback;
+        # do not accidentally enable regex-only features such as recursion.
+        re.compile(pattern, re.IGNORECASE)
     except re.error:
-        return re.compile(re.escape(pattern), re.IGNORECASE)
+        pattern = re.escape(pattern)
+    except (RecursionError, OverflowError) as exc:
+        raise ToolSearchLimitError("Regex compilation exceeds the supported query budget.") from exc
+    try:
+        return regex.compile(pattern, regex.IGNORECASE | regex.VERSION0)
+    except (regex.error, RecursionError, OverflowError) as exc:
+        raise ToolSearchLimitError("Regex compilation exceeds the supported query budget.") from exc
+
+
+def _remaining_regex_time(deadline: float) -> float:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise ToolSearchLimitError("Regex search exceeded its execution budget.")
+    return remaining
+
+
+def _catalog_searchable(t: BaseTool) -> str:
+    description = t.description or ""
+    if len(t.name) > MAX_REGEX_FIELD_CHARS or len(description) > MAX_REGEX_FIELD_CHARS:
+        raise ToolSearchLimitError(f"A tool name or description exceeds the {MAX_REGEX_FIELD_CHARS}-character regex search budget.")
+    return f"{t.name} {description}"
 
 
 # ── Catalog ──
@@ -96,22 +129,39 @@ class DeferredToolCatalog:
             required = parts[0].lower()
             candidates = [t for t in self.tools if required in t.name.lower()]
             if len(parts) > 1:
-                candidates.sort(key=lambda t: _catalog_regex_score(parts[1], t), reverse=True)
+                deadline = monotonic() + REGEX_QUERY_TIMEOUT_SECONDS
+                compiled = _compile_catalog_regex(parts[1])
+                try:
+                    candidates.sort(key=lambda t: _catalog_regex_score(compiled, t, deadline), reverse=True)
+                except TimeoutError as exc:
+                    raise ToolSearchLimitError("Regex search exceeded its execution budget.") from exc
+                _remaining_regex_time(deadline)
             return candidates[:MAX_RESULTS]
 
-        regex = _compile_catalog_regex(query)
+        deadline = monotonic() + REGEX_QUERY_TIMEOUT_SECONDS
+        compiled = _compile_catalog_regex(query)
         scored: list[tuple[int, BaseTool]] = []
-        for t in self.tools:
-            searchable = f"{t.name} {t.description or ''}"
-            if regex.search(searchable):
-                scored.append((2 if regex.search(t.name) else 1, t))
+        try:
+            for t in self.tools:
+                searchable = _catalog_searchable(t)
+                if compiled.search(searchable, timeout=_remaining_regex_time(deadline)):
+                    scored.append((2 if compiled.search(t.name, timeout=_remaining_regex_time(deadline)) else 1, t))
+        except TimeoutError as exc:
+            raise ToolSearchLimitError("Regex search exceeded its execution budget.") from exc
         scored.sort(key=lambda x: x[0], reverse=True)
+        _remaining_regex_time(deadline)
         return [t for _, t in scored][:MAX_RESULTS]
 
 
-def _catalog_regex_score(pattern: str, t: BaseTool) -> int:
-    regex = _compile_catalog_regex(pattern)
-    return len(regex.findall(f"{t.name} {t.description or ''}"))
+def _catalog_regex_score(compiled: regex.Pattern[str], t: BaseTool, deadline: float) -> int:
+    # Count without materializing every captured substring in findall(). The
+    # same deadline covers every candidate and every match, including empty ones.
+    matches = compiled.finditer(_catalog_searchable(t), timeout=_remaining_regex_time(deadline))
+    count = 0
+    for _ in matches:
+        _remaining_regex_time(deadline)
+        count += 1
+    return count
 
 
 # ── Setup / tool ──
@@ -156,12 +206,16 @@ def build_tool_search_tool(catalog: DeferredToolCatalog) -> BaseTool:
           - "notebook jupyter" -- keyword search, up to max_results best matches
           - "+slack send" -- require "slack" in the name, rank by remaining terms
         """
-        matched = catalog.search(query)
-        if not matched:
-            content, names = f"No tools found matching: {query}", []
+        try:
+            matched = catalog.search(query)
+        except ToolSearchLimitError as exc:
+            content, names = f"Tool search stopped: {exc} Use a simpler query or select: with exact tool names.", []
         else:
-            content = json.dumps([convert_to_openai_function(t) for t in matched], indent=2, ensure_ascii=False)
-            names = [t.name for t in matched]
+            if matched:
+                content = json.dumps([convert_to_openai_function(t) for t in matched], indent=2, ensure_ascii=False)
+                names = [t.name for t in matched]
+            else:
+                content, names = f"No tools found matching: {query}", []
         return Command(
             update={
                 "promoted": {"catalog_hash": catalog_hash, "names": names},
