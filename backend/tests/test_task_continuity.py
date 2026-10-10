@@ -903,3 +903,35 @@ def test_search_excerpt_falls_back_when_folded_term_cannot_fit(role_runtime, arc
     assert row["excerpt_match"] is False
     assert (row["excerpt_start"], row["excerpt_end"]) == (0, 600)
     assert row["excerpt"] == message.content[:600]
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_search_excerpt_skips_oversized_occurrence_for_later_fitting_hit(role_runtime, archived):
+    import json
+
+    text = "padding " * 125 + "s" * 800 + " gap " * 200 + "ß" * 400 + " tail" * 200
+    message = HumanMessage(content=text, id="later-fitting-hit")
+    role_runtime.state = {"messages": [message]}
+    if archived:
+        role_runtime.state = {"task_history": archive.capture({}, role_runtime, [message], TaskContinuityConfig(enabled=True))}
+    row = json.loads(history_search.invoke({"runtime": role_runtime, "query": "ß" * 400}))["results"][0]
+    assert row["excerpt_match"] is True
+    assert (row["excerpt_start"], row["excerpt_end"]) == (2700, 3300)
+    assert "ß" * 400 in row["excerpt"]
+    assert row["excerpt"] == text[2700:3300]
+    page = json.loads(history_read.invoke({"runtime": role_runtime, "source_id": row["id"], "offset": row["excerpt_start"]}))
+    assert page["text"].startswith(row["excerpt"])
+
+
+def test_search_excerpt_finds_fitting_overlap_after_oversized_occurrence(role_runtime):
+    import json
+
+    text = "padding " * 125 + "s" * 700 + "ß" * 400 + " tail" * 200
+    role_runtime.state = {"messages": [HumanMessage(content=text, id="overlapping-hit")]}
+    row = json.loads(history_search.invoke({"runtime": role_runtime, "query": "ß" * 400}))["results"][0]
+    assert row["excerpt_match"] is True
+    assert (row["excerpt_start"], row["excerpt_end"]) == (1300, 1900)
+    assert row["excerpt"] == text[1300:1900]
+    assert row["excerpt"].casefold() == "s" * 800
+    page = json.loads(history_read.invoke({"runtime": role_runtime, "source_id": row["id"], "offset": row["excerpt_start"]}))
+    assert page["text"].startswith(row["excerpt"])

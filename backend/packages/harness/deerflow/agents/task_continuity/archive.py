@@ -101,16 +101,25 @@ def index_text(text: str) -> str:
 
 
 def _search_excerpt(text: str, keywords: list[str], *, substring: bool) -> dict:
-    """Locate the first casefolded keyword match and return an excerpt from the readable source."""
+    """Locate the first fitting casefolded keyword match and return an excerpt from the readable source."""
     folded = text.casefold()
+    positions = [index for index, char in enumerate(text) for _ in char.casefold()]
     if substring:
-        hits = [(position, position + len(term)) for term in keywords if (position := folded.find(term)) >= 0]
+        hits = []
+        for term in keywords:
+            position = folded.find(term)
+            while position >= 0:
+                right = position + len(term)
+                if positions[right - 1] + 1 - positions[position] <= 600:
+                    hits.append((position, right))
+                    break
+                # A later, even overlapping occurrence may fit after mapping back to original characters.
+                position = folded.find(term, position + 1)
     else:
         keyword_set = set(keywords)
         hits = [(left, right) for word, left, right in _token_spans(folded) if word in keyword_set]
     start = 0
     if hits:
-        positions = [index for index, char in enumerate(text) for _ in char.casefold()]
         hits = [(positions[left], positions[right - 1] + 1) for left, right in hits if positions[right - 1] + 1 - positions[left] <= 600]
     if hits:
         match_start, match_end = min(hits)

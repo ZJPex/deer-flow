@@ -67,8 +67,10 @@ context, searching for `needle` returns `excerpt_start=4703` and
 from that excerpt onward. The excerpt is centered on the earliest locatable term
 where possible and shifts at source boundaries, up to 600 characters. Multiple
 terms retain OR matching: choose the earliest source position, preferring the
-shorter term when starts tie. The excerpt need not cover all terms, and result
-ranking is unchanged. Repeated terms do not increase the result count.
+shorter term when starts tie. Skip occurrences whose original spans cannot fit
+within 600 characters and continue to the earliest fitting occurrence, including
+later occurrences of the same term. The excerpt need not cover all terms, and
+result ranking is unchanged. Repeated terms do not increase the result count.
 
 Queries still tokenize only the first 500 characters and use the first 32 terms.
 Active sources retain casefolded substring matching; archived sources retain FTS
@@ -76,8 +78,8 @@ token matching. Location shares the English-word and Chinese-bigram tokenizer.
 Length-changing casefolds such as `Straße` map back to original positions; the
 combining dot produced by folding `İ` follows the existing tokenization rules.
 FTS normalization may not map exactly to indexed terms, such as `cafe` matching
-`café`. If a complete match cannot be located, or the matched term's original span
-cannot fit within 600 characters, return the source opening with
+`café`. If no complete match can be located with an original span that fits
+within 600 characters, return the source opening with
 `excerpt_match=false` rather than claiming the excerpt contains the keyword.
 
 Offsets apply only to the source readable in the same state. The active version
